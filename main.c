@@ -184,16 +184,19 @@ int main(int argc, const char **argv) {
     }
 
     /* Allocate the events buffers */
-    control_events_buffer = (Event *) malloc(120000u);
+    control_events_buffer = (Event *) malloc(sizeof(Event) * 10000);
     if (!control_events_buffer)
         print_error("%s", "lbuf1");
-    merged_events_buffer = (Event *) malloc(120000u);
+
+    merged_events_buffer = (Event *) malloc(sizeof(Event) * 10000);
     if (!merged_events_buffer)
         print_error("%s", "lbuf2");
-    meta_events_buffer = (Event *) malloc(12000u);
+
+    meta_events_buffer = (Event *) malloc(sizeof(Event) * 1000);
     if (!meta_events_buffer)
         print_error("%s", "sbuf1");
-    buffer_512 = (char *) malloc(512u);
+
+    buffer_512 = (uint32_t *) malloc(sizeof(uint32_t) * 128);
     if (!buffer_512)
         print_error("%s", "kontbl");
 

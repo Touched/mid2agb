@@ -1,29 +1,6 @@
 #include "midi.h"
 
-#include <stdio.h>
-
-#include "globals.h"
 #include "utils.h"
-
-uint16_t midi_format_short;
-
-uint16_t midi_number_of_tracks;
-
-uint16_t midi_time_div;
-
-long midi_header_end = 0;
-
-long track_data_start;
-
-int last_control_event_byte;
-
-uint8_t sfile_num_blocks;
-
-int midi_channel;
-
-int negative_one_thing;
-
-int starts_at_zero_thing;
 
 /*
  * TODO: Implement this better, it only works for 4 char strings and is ugly besides
@@ -66,7 +43,7 @@ int move_to_track_start() {
     if (result)
         print_error("%s", input_file_name);
     midi_absolute_time = 0;
-    last_control_event_byte = -128;
+    last_control_event_byte = 0x80;
     return result;
 }
 
@@ -136,9 +113,6 @@ int check_second_parameter_needed(uint8_t byte) {
 }
 
 signed int control_event(uint8_t *type_and_channel, uint8_t *event_parameter) {
-    uint8_t v4;
-    signed int result;
-
     *type_and_channel = (uint8_t) fgetc(input_file_fp);
 
     /* Is this event a meta event? */
@@ -366,7 +340,7 @@ signed int compare_event_maybe(Event *control_event, Event *meta_event) {
     return 0;
 }
 
-uint32_t read_track_and_chunksize() {
+long read_track_and_chunksize() {
     FILE *v0; // esi@4
     int32_t v1; // eax@5
     long result; // eax@8
@@ -399,132 +373,110 @@ int assert_a_leq_b(int a1, int a2) {
     return result;
 }
 
-int buffer_track_meta_events(char *buffer, int max_events) {
-    char *events_buffer; // ebx@1
-    int i; // edi@1
-    int v4; // eax@4
-    int end_of_track; // eax@4
+int buffer_track_meta_events(Event *buffer, int max_events) {
+    /*
+    This seems to take the events inside buffer and condense the array into an array of meta events.
+     */
 
-    i = 0;
+    Event *events_buffer = buffer;
+    int i = 0;
+    int end_of_track;
+
     move_to_track_start();
-    events_buffer = buffer;
+
     do {
-        assert_a_leq_b(i, max_events);              // make sure there is space in the buffer
+        /* make sure there is space in the buffer */
+        assert_a_leq_b(i, max_events);
+
+        /* Find next meta event */
         while (next_meta_event(events_buffer));
-        v4 = i;
-        events_buffer += 12;                        // Each event in the mid2agb buffer takes up 12 bytes.
-        // dword time (NOT delta time), dword for type, dword for parameter
-        ++i;
-        end_of_track = track_end((Event *) &buffer[12 * v4]);
-    }
-    while (!end_of_track);
+
+        /* advance to the next event */
+        events_buffer++;
+
+        /* check if end of track was reached */
+        end_of_track = track_end(&buffer[i++]);
+    } while (!end_of_track);
+
     return end_of_track;
 }
 
 signed int find_note_finish(Event *buffer) {
-    signed int result; // eax@9
-    char v2; // al@12
-    char parameter; // [sp+6h] [bp-2h]@1
-    char type_byte; // [sp+7h] [bp-1h]@1
+    uint8_t parameter;
+    uint8_t type_byte;
 
     buffer->param2 += read_variable_length_quantity();
-    if (control_event((uint8_t *) &type_byte, (int) &parameter)) {
+
+    /* buffer_512 seems to be a buffer of which notes are currently playing? */
+
+    if (control_event(&type_byte, &parameter)) {
         if ((type_byte & 0xF0) == 0x80u) {
+
             fgetc(input_file_fp);
+
             if ((type_byte & 0xF) == midi_channel) {
-                if (*(_BYTE * )(buffer + 4) - parameter == 64) {
-                    --*(_DWORD * ) & buffer_512[4 * *(_BYTE * )(buffer + 4) - 256];
-                    if (!*(_DWORD * ) & buffer_512[4 * *(_BYTE * )(buffer + 4) - 256])
+                if (buffer->type - parameter == 64) {
+                    --buffer_512[buffer->type - 256];
+
+                    if (!buffer_512[buffer->type - 256])
                         return 0;
                 }
             }
             return -1;
         }
         if ((type_byte & 0xF0) == 0x90u) {
-            --input_file_fp->_cnt;
-            if (input_file_fp->_cnt < 0)
-                v2 = _filbuf(input_file_fp);
-            else
-                v2 = *input_file_fp->_ptr++;
-            if ((type_byte & 0xF) == midi_channel && *(_BYTE * )(buffer + 4) - parameter == 64) {
-                if (v2)
+            if ((type_byte & 0xF) == midi_channel && buffer->type - parameter == 64) {
+                if (fgetc(input_file_fp))
                     return 0;
-                --*(_DWORD * ) & buffer_512[4 * *(_BYTE * )(buffer + 4) - 256];
-                if (!*(_DWORD * ) & buffer_512[4 * *(_BYTE * )(buffer + 4) - 256])
+
+                --buffer_512[buffer->type - 256];
+
+                if (!buffer_512[buffer->type - 256])
                     return 0;
             }
             return -1;
         }
+
         if (check_second_parameter_needed(type_byte) == 3) {
-            --input_file_fp->_cnt;
-            if (input_file_fp->_cnt < 0) {
-                _filbuf(input_file_fp);
-                result = -1;
-            }
-            else {
-                ++input_file_fp->_ptr;
-                result = -1;
-            }
-            return result;
+            fgetc(input_file_fp);
         }
+
         return -1;
     }
-    if (type_byte == -16 || type_byte == -9) {
+
+    /* Skip sysEx events */
+    if (type_byte == 0xF0 || type_byte == 0xF7) {
         read_variable_length_and_seek_past();
         return -1;
     }
-    if (type_byte != -1)
-        print_error(unk_40C0F0, input_file_name);
-    if (parameter == 47)
+
+    if (type_byte != 0xFF)
+        print_error("%s", input_file_name);
+
+    if (parameter == 0x2F)
         print_error("KEYOFF�C�x���g������܂��");
+
     read_variable_length_and_seek_past();
     return -1;
 }
 
-int find_when_note_finishes_and_return(char *buffer) {
-    char store; // bl@1
-    __int32 prev_pos; // edi@1
-    int result; // eax@3
+int find_when_note_finishes_and_return(Event *buffer) {
+    uint8_t store;
+    long prev_pos;
+    int result;
 
     prev_pos = ftell(input_file_fp);
     store = last_control_event_byte;
-    *((_DWORD *) buffer + 2) = 0;
-    ++*(_DWORD * ) & buffer_512[4 * (unsigned __int8)buffer[4] - 256];
+    buffer->param2 = 0;
+
+    ++buffer_512[buffer->type - 256];
     while (find_note_finish((int) buffer));
+
     result = fseek(input_file_fp, prev_pos, 0);
     if (result)
-        print_error(unk_40C0E4, input_file_name);
+        print_error("%s", input_file_name);
+
     last_control_event_byte = store;
-    return result;
-}
-
-int buffer_track_control_events(char *a1, int a2) {
-    signed int i; // eax@1
-    int j; // ebx@3
-    char *v4; // esi@3
-    int v5; // eax@6
-    int result; // eax@6
-
-    move_to_track_start();
-    i = 0;                                        // zero out buffer
-    do {
-        i += 4;
-        *(_DWORD * ) & buffer_512[i - 4] = 0;
-    }
-    while (i < 512);
-    j = 0;
-    v4 = a1;
-    negative_one_thing = -1;
-    starts_at_zero_thing = 0;
-    do {
-        assert_a_leq_b(j, a2);
-        while (next_control_event((Event *) v4));
-        v5 = j;
-        v4 += 12;
-        ++j;
-        result = track_end((Event *) &a1[12 * v5]);
-    }
-    while (!result);
     return result;
 }
 
@@ -550,7 +502,7 @@ signed int next_control_event(Event *buffer) {
 
                     if (buffer->param1) {
                         buffer->type = parameter + (uint8_t) 0x40;
-                        find_when_note_finishes_and_return((char *) buffer);
+                        find_when_note_finishes_and_return(buffer);
                         if (buffer->param2) {
                             if (parameter < (uint8_t) negative_one_thing)
                                 negative_one_thing = parameter;
@@ -606,4 +558,33 @@ signed int next_control_event(Event *buffer) {
 
     read_variable_length_and_seek_past();
     return -1;
+}
+
+int buffer_track_control_events(Event *buffer, int max_events) {
+    signed int i;
+    int j;
+    Event *v4;
+    int result;
+
+    move_to_track_start();
+
+    /* Clean buffer */
+    i = 0;
+    do {
+        buffer_512[i++] = 0;
+    }
+    while (i < 128);
+
+    j = 0;
+    v4 = buffer;
+    negative_one_thing = -1;
+    starts_at_zero_thing = 0;
+    do {
+        assert_a_leq_b(j, max_events);
+        while (next_control_event(v4));
+        v4++;
+        result = track_end(&buffer[12 * ++j]);
+    }
+    while (!result);
+    return result;
 }

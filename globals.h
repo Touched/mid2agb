@@ -24,7 +24,7 @@ extern Event *merged_events_buffer;
 
 extern Event *meta_events_buffer;
 
-extern char *buffer_512;
+extern uint32_t *buffer_512;
 
 extern FILE *input_file_fp;
 
@@ -53,5 +53,27 @@ extern uint16_t midi_time_div;
 extern long midi_header_end;
 
 extern uint32_t midi_absolute_time;
+
+extern uint16_t midi_format_short;
+
+extern uint16_t midi_number_of_tracks;
+
+extern uint16_t midi_time_div;
+
+extern long midi_header_end;
+
+extern long track_data_start;
+
+extern uint8_t last_control_event_byte;
+
+extern uint8_t sfile_num_blocks;
+
+extern int midi_channel;
+
+extern int negative_one_thing;
+
+extern int starts_at_zero_thing;
+
+extern long Offset;
 
 #endif /* MID2AGB_GLOBALS_H_ */
